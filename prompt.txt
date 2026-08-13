@@ -1,0 +1,1851 @@
+# Aufgabe
+
+Entwickle eine vollständige, produktionsfähige, möglichst kleine und schlanke **First-Party-Web-Analytics-Anwendung** für Webseiten und Webapplikationen.
+
+Arbeitsname des Projekts:
+
+**lumly**
+
+Das System soll eine selbst gehostete Alternative zu klassischen Tracking- und Analytics-Lösungen darstellen.
+
+Die Hauptziele sind:
+
+1. extrem einfache Integration in beliebige Webseiten und Webapplikationen
+2. möglichst kleines Browser-SDK
+3. möglichst umfangreiche und aussagekräftige Analytics
+4. Privacy by Design
+5. DSGVO- und TDDDG-orientierte Architektur für Deutschland/EU
+6. keine Abhängigkeit von Google, Meta oder anderen Tracking-Drittanbietern
+7. vollständige Kontrolle über die erhobenen Daten
+8. übersichtliches Dashboard
+9. leicht erweiterbare Analyseansichten
+10. einfacher Self-Hosting-Betrieb
+
+Wichtig:
+
+Behaupte im Produkt und in der Dokumentation **niemals pauschal, das System sei automatisch oder garantiert „DSGVO-konform“**.
+
+Die Rechtmäßigkeit hängt unter anderem von Betreiber, Zweck, Konfiguration, Rechtsgrundlage, Einwilligungsmanagement und Datenschutzerklärung ab.
+
+Baue stattdessen eine Architektur, die datenschutzfreundliche Konfigurationen technisch erzwingt und eine nachvollziehbare Dokumentation der Verarbeitung ermöglicht.
+
+---
+
+# 1. Technologiestack
+
+Verwende bevorzugt:
+
+* TypeScript für Browser-SDK, Backend und Dashboard
+* Node.js Current LTS
+* Fastify als HTTP-Server
+* React + Vite für das Dashboard
+* MariaDB als Datenbank
+* native SQL-Migrationen oder eine sehr dünne SQL-Abstraktion
+* Docker und Docker Compose
+* pnpm Workspaces
+
+Vermeide unnötige Frameworks und Infrastruktur.
+
+Insbesondere kein:
+
+* Redis
+* Kafka
+* Elasticsearch
+* separates Data Warehouse
+* Kubernetes
+* Microservice-Zoo
+
+für Version 1.
+
+Das gesamte System soll für kleine und mittlere Installationen mit folgenden Komponenten auskommen:
+
+```text
+Browser
+   │
+   ▼
+lumly Tracker
+   │
+   ▼
+lumly Server
+   │
+   ├── Collector API
+   ├── Analytics API
+   ├── Dashboard
+   ├── Tracker JS
+   └── Aggregation / Retention Jobs
+           │
+           ▼
+        MariaDB
+```
+
+---
+
+# 2. Projektstruktur
+
+Erstelle ein Monorepo ungefähr dieser Form:
+
+```text
+lumly/
+├── AGENTS.md
+├── README.md
+├── package.json
+├── pnpm-workspace.yaml
+├── docker-compose.yml
+├── .env.example
+│
+├── apps/
+│   ├── server/
+│   └── dashboard/
+│
+├── packages/
+│   ├── tracker/
+│   └── shared/
+│
+├── migrations/
+│
+├── docs/
+│   ├── architecture.md
+│   ├── integration.md
+│   ├── privacy-design.md
+│   ├── data-dictionary.md
+│   ├── legal-checklist.md
+│   └── custom-events.md
+│
+└── tests/
+```
+
+Der Server soll im Produktionsbetrieb sowohl das Dashboard als auch `tracker.js` ausliefern können.
+
+---
+
+# 3. Zentrales Datenschutzmodell
+
+Implementiere zwei eindeutig getrennte Tracking-Modi.
+
+## Modus A: BASIC / cookieless
+
+Dieser Modus muss ohne persistente Identifikation funktionieren.
+
+Er ist der datenschutzfreundliche Standardmodus.
+
+Er darf insbesondere NICHT verwenden:
+
+* Cookies
+* localStorage
+* sessionStorage
+* IndexedDB
+* Fingerprinting
+* Canvas Fingerprinting
+* WebGL Fingerprinting
+* Audio Fingerprinting
+* Font Fingerprinting
+* persistente Device IDs
+* persistente Visitor IDs
+* persistente Session IDs
+* probabilistische Wiedererkennung
+* Hash aus IP + User Agent
+* Cross-Site-Tracking
+
+In diesem Modus darf ein Besucher zwischen zwei Seitenaufrufen **nicht wiedererkannt werden**.
+
+Deshalb darf das Dashboard in BASIC auch keine erfundenen Kennzahlen wie „Unique Visitors“ oder „Sessions“ anzeigen.
+
+Nicht ermittelbare Werte werden ausdrücklich als nicht verfügbar gekennzeichnet.
+
+## Modus B: CONSENTED
+
+Dieser Modus wird ausschließlich aktiviert, nachdem die Anwendung eine gültige Analytics-Einwilligung vom Consent-Management der integrierenden Webseite erhalten hat.
+
+Er darf zusätzlich pseudonyme Besucher- und Sitzungsinformationen verwenden.
+
+Beispielsweise:
+
+```text
+visitor_id
+session_id
+```
+
+Diese IDs müssen:
+
+* zufällig erzeugt sein
+* ausreichend Entropie besitzen
+* keinerlei persönliche Information codieren
+* First Party sein
+* nach Widerruf der Einwilligung entfernt werden
+
+Verwende niemals Fingerprinting als Ersatz für eine Visitor-ID.
+
+---
+
+# 4. Consent API
+
+Das Tracking-SDK darf kein eigenes Cookie-Banner voraussetzen.
+
+Stattdessen muss es sich problemlos mit bestehenden Consent-Management-Systemen verbinden lassen.
+
+Biete eine API wie:
+
+```ts
+tracker.setConsent("granted");
+tracker.setConsent("denied");
+tracker.setConsent("unknown");
+```
+
+oder:
+
+```ts
+tracker.setConsent({
+    analytics: true
+});
+```
+
+Default:
+
+```text
+unknown
+```
+
+`unknown` und `denied` dürfen ausschließlich BASIC-Tracking erlauben.
+
+Erst `granted` aktiviert CONSENTED.
+
+Beim Wechsel:
+
+```text
+unknown -> granted
+```
+
+dürfen IDs erzeugt und erweiterte Daten erhoben werden.
+
+Beim Wechsel:
+
+```text
+granted -> denied
+```
+
+müssen:
+
+* persistente Analytics-IDs lokal entfernt werden
+* CONSENTED-Tracking sofort beendet werden
+* BASIC-Modus aktiviert werden
+* optional eine Funktion angeboten werden, mit der zuvor gespeicherte pseudonyme Trackingdaten gelöscht werden können
+
+Biete dafür beispielsweise:
+
+```ts
+tracker.forget();
+```
+
+---
+
+# 5. BASIC-Tracking
+
+Erhebe im BASIC-Modus nur Informationen, die ohne persistente Wiedererkennung sinnvoll auswertbar sind.
+
+Mindestens:
+
+```text
+event_id
+site_id
+event_type
+timestamp
+page_path
+page_title
+hostname
+referrer_host
+referrer_path bei same-origin
+campaign_source
+campaign_medium
+campaign_campaign
+tracking_mode = basic
+```
+
+Query-Parameter dürfen grundsätzlich NICHT vollständig gespeichert werden.
+
+Standardmäßig:
+
+```text
+?email=
+?token=
+?user=
+?session=
+?search=
+```
+
+und sämtliche unbekannten Queryparameter entfernen.
+
+Nur ausdrücklich konfigurierte Marketingparameter dürfen verarbeitet werden, beispielsweise:
+
+```text
+utm_source
+utm_medium
+utm_campaign
+utm_content
+utm_term
+```
+
+Auch diese:
+
+* auf eine maximale Länge beschränken
+* Steuerzeichen entfernen
+* keine unbeschränkten freien Werte zulassen
+
+Der Server darf die Quell-IP technisch für die Verarbeitung der HTTP-Anfrage sehen.
+
+Die rohe IP-Adresse darf jedoch niemals in der Analytics-Datenbank gespeichert werden.
+
+Falls Geo-Auswertung aktiviert wird:
+
+```text
+IP
+ -> transient verarbeiten
+ -> grobe Region ermitteln
+ -> maximal Land / optional Bundesland speichern
+ -> IP verwerfen
+```
+
+Geo-Auswertung muss konfigurierbar sein und darf nicht als rechtlich automatisch zulässig dargestellt werden.
+
+Den vollständigen User-Agent nicht speichern.
+
+Falls sinnvoll, serverseitig daraus nur grobe Kategorien ableiten:
+
+```text
+browser_family
+os_family
+device_class
+```
+
+Danach den vollständigen User-Agent verwerfen.
+
+---
+
+# 6. CONSENTED-Tracking
+
+Nach Einwilligung können zusätzlich folgende Informationen erhoben werden:
+
+## Besucher
+
+```text
+visitor_id
+session_id
+returning_visitor
+session_number
+```
+
+## Navigation
+
+```text
+page_view
+route_change
+previous_page
+entry_page
+exit_page
+```
+
+## Engagement
+
+```text
+engagement_time
+scroll_25
+scroll_50
+scroll_75
+scroll_100
+outbound_link
+file_download
+```
+
+## Geräteinformationen
+
+Nur sinnvolle, grobe Kategorien:
+
+```text
+browser_family
+browser_major_version
+os_family
+device_class
+viewport_width_bucket
+viewport_height_bucket
+screen_width_bucket
+language
+timezone
+```
+
+Keine Hardware-Fingerprints erzeugen.
+
+## Performance
+
+Erfasse beispielsweise:
+
+```text
+TTFB
+FCP
+LCP
+CLS
+INP
+navigation_time
+DOMContentLoaded
+load_time
+```
+
+Sofern eine Browser-API nicht verfügbar ist, darf kein Fehler entstehen.
+
+## Custom Events
+
+API:
+
+```ts
+tracker.track("cta_click", {
+    placement: "hero",
+    variant: "blue"
+});
+```
+
+Custom Properties müssen serverseitig validiert werden.
+
+Erlaube standardmäßig nur primitive Werte:
+
+```text
+string
+number
+boolean
+null
+```
+
+Begrenze:
+
+```text
+Anzahl Properties
+Länge der Keys
+Länge der Strings
+Eventgröße insgesamt
+```
+
+---
+
+# 7. Was niemals automatisch gesammelt werden darf
+
+Implementiere harte Schutzmechanismen gegen:
+
+* Passwörter
+* Formularinhalte
+* Texteingaben
+* E-Mail-Adressen
+* Telefonnummern
+* Namen
+* Kreditkartendaten
+* Adressen
+* Clipboard-Inhalte
+* Datei-Inhalte
+* komplette DOM-Snapshots
+* Session Recording
+* Mausbewegungs-Replay
+* Tastatureingaben
+* genaue GPS-Positionen
+* Auth-Token
+* JWTs
+* Session-Cookies
+* URL-Fragmente mit sensiblen Informationen
+* vollständige Querystrings
+* rohe IP-Adressen
+* Canvas-/WebGL-/Audio-Fingerprints
+
+Formulare dürfen höchstens ein abstraktes Event wie:
+
+```text
+form_submit
+```
+
+senden.
+
+Niemals Feldnamen und Feldwerte automatisch mitsenden.
+
+---
+
+# 8. PII-Schutz
+
+Implementiere einen zentralen Sanitizer.
+
+Alle eingehenden Events müssen den Sanitizer passieren.
+
+Er soll verdächtige Property-Namen erkennen, beispielsweise:
+
+```text
+email
+mail
+phone
+telephone
+password
+passwd
+token
+jwt
+auth
+authorization
+firstname
+lastname
+fullname
+address
+street
+iban
+creditcard
+```
+
+Solche Felder werden standardmäßig verworfen.
+
+Zusätzlich einfache Erkennung typischer:
+
+* E-Mail-Adressen
+* Bearer Tokens
+* JWTs
+* Kreditkartennummern
+
+in frei übergebenen Strings.
+
+Der Sanitizer dient als zusätzliche Schutzschicht und darf nicht als perfekte PII-Erkennung dargestellt werden.
+
+---
+
+# 9. Tracker SDK
+
+Das Browser-SDK ist ein Kernbestandteil des Produkts.
+
+Ziel:
+
+```text
+<= 8 kB gzip
+```
+
+Hard Limit:
+
+```text
+12 kB gzip
+```
+
+Falls das Ziel nicht erreichbar ist, dokumentiere die Ursache.
+
+Das SDK darf keine Runtime-Abhängigkeit von React oder anderen Frameworks besitzen.
+
+Eigenschaften:
+
+* Vanilla TypeScript
+* tree-shakeable
+* kein externes Tracking
+* kein CDN-Zwang
+* async/defer kompatibel
+* Navigation niemals blockieren
+* Fehler im Tracker dürfen die Host-Anwendung niemals beschädigen
+* `navigator.sendBeacon()` bevorzugen, wo sinnvoll
+* ansonsten `fetch(..., { keepalive: true })`
+* Events bei Bedarf bündeln
+* Fehler intern abfangen
+* kein `console.log` in Production
+
+---
+
+# 10. Script-Tag-Integration
+
+Die einfachste Integration muss ungefähr so aussehen:
+
+```html
+<script
+    defer
+    src="https://analytics.example.org/tracker.js"
+    data-site="SITE_ID"
+    data-endpoint="https://analytics.example.org/api/v1/collect">
+</script>
+```
+
+Nach Laden soll automatisch der erste Page View erfasst werden.
+
+Biete Konfiguration über:
+
+```html
+data-site
+data-endpoint
+data-auto-track
+data-consent
+```
+
+---
+
+# 11. NPM-Integration
+
+Zusätzlich soll das SDK als NPM-Paket verwendbar sein.
+
+Beispiel:
+
+```ts
+import { createTracker } from "@lumly/browser";
+
+const tracker = createTracker({
+    siteId: "...",
+    endpoint: "https://analytics.example.org/api/v1/collect"
+});
+
+tracker.start();
+```
+
+Custom Event:
+
+```ts
+tracker.track("signup_started", {
+    source: "pricing"
+});
+```
+
+Consent:
+
+```ts
+tracker.setConsent("granted");
+```
+
+---
+
+# 12. SPA-Unterstützung
+
+Unterstütze Single Page Applications.
+
+Erkenne:
+
+```text
+history.pushState
+history.replaceState
+popstate
+```
+
+und erfasse neue virtuelle Page Views.
+
+Verhindere doppelte Page Views.
+
+Frameworkabhängige Integration darf nicht notwendig sein.
+
+Dokumentiere trotzdem Beispiele für:
+
+* React
+* Next.js
+* Vue
+* klassische HTML-Seiten
+* serverseitig gerenderte Anwendungen
+
+---
+
+# 13. Sites
+
+Eine lumly-Installation muss mehrere Webseiten verwalten können.
+
+Eine Site besitzt beispielsweise:
+
+```text
+id
+name
+domain
+allowed_origins
+created_at
+timezone
+retention_days
+geo_enabled
+default_tracking_mode
+query_parameter_allowlist
+```
+
+Ein öffentlicher `site_id` ist keine geheime Information.
+
+Sicherheit darf niemals davon abhängen, dass der Browser einen geheimen API-Key enthält.
+
+Validiere Collector-Anfragen anhand der erlaubten Origins.
+
+---
+
+# 14. Collector API
+
+Hauptendpunkt:
+
+```http
+POST /api/v1/collect
+```
+
+Unterstütze einzelne Events und kleine Batches.
+
+Beispiel:
+
+```json
+{
+    "site": "...",
+    "events": [
+        {
+            "type": "page_view",
+            "timestamp": "...",
+            "path": "/produkte",
+            "mode": "basic"
+        }
+    ]
+}
+```
+
+Grenzen:
+
+```text
+max. 20 Events pro Batch
+max. Requestgröße ca. 32–64 kB
+max. Property-Anzahl
+max. Stringlängen
+```
+
+Ungültige Events:
+
+* niemals teilweise ungeprüft speichern
+* mit nachvollziehbarer Fehlerbehandlung verwerfen
+
+Bei erfolgreicher Annahme genügt:
+
+```http
+204 No Content
+```
+
+oder:
+
+```http
+202 Accepted
+```
+
+---
+
+# 15. Missbrauchsschutz
+
+Der Collector ist öffentlich erreichbar.
+
+Implementiere:
+
+* Allowed-Origin-Prüfung
+* Request Size Limits
+* Schema Validation
+* Property Limits
+* Event Type Allowlist
+* Rate Limiting
+* Bot-/Crawler-Kennzeichnung, soweit zuverlässig möglich
+* keine Speicherung der IP für Rate Limiting
+
+IP-basierte Rate-Limit-Informationen nur kurzzeitig im Arbeitsspeicher halten.
+
+Ein öffentlicher Site-Identifier darf niemals als Authentifizierung behandelt werden.
+
+---
+
+# 16. MariaDB-Datenmodell
+
+Verwende MariaDB.
+
+Entwickle ein übersichtliches, migrationsfähiges Schema.
+
+Mindestens:
+
+```text
+sites
+events
+analytics_hourly
+analytics_daily
+dashboard_users
+funnel_definitions
+schema_migrations
+```
+
+Die zentrale Event-Tabelle sollte Kernfelder typisiert speichern und nur flexible Custom Properties als JSON.
+
+Beispiel:
+
+```text
+events
+
+id
+site_id
+occurred_at
+received_at
+event_type
+event_name
+tracking_mode
+
+visitor_id NULL
+session_id NULL
+
+hostname
+page_path
+page_title
+
+referrer_host
+referrer_path
+
+campaign_source
+campaign_medium
+campaign_name
+
+browser_family
+browser_version_major
+os_family
+device_class
+
+country_code
+region_code
+
+duration_ms
+numeric_value
+
+properties JSON
+```
+
+Wichtig:
+
+`visitor_id` und `session_id` müssen bei BASIC immer NULL sein.
+
+Füge sinnvolle Indizes hinzu, insbesondere für:
+
+```text
+site + time
+site + event_type + time
+site + page_path + time
+site + visitor + time
+site + session + time
+```
+
+Vermeide übermäßige Indizierung.
+
+---
+
+# 17. Aggregationen
+
+Rohdaten sollen nicht unbegrenzt für jedes Dashboard-Rendering neu aggregiert werden.
+
+Implementiere Rollups.
+
+Mindestens:
+
+```text
+hourly
+daily
+```
+
+Aggregierte Tabellen dürfen keine Visitor- oder Session-ID enthalten.
+
+Speichere typische Kennzahlen wie:
+
+```text
+page_views
+events
+consented_page_views
+basic_page_views
+engagement_time
+bounce/session metrics nur soweit mathematisch möglich
+performance averages
+```
+
+Dimensionen beispielsweise:
+
+```text
+page
+referrer
+campaign
+browser
+os
+device
+country
+event
+```
+
+Vermeide eine explosionsartige Kombination sämtlicher Dimensionen.
+
+---
+
+# 18. Retention
+
+Rohdaten müssen automatisch gelöscht werden können.
+
+Konfigurierbare Default-Retention, beispielsweise:
+
+```text
+90 Tage
+```
+
+Dies ist eine technische Voreinstellung und keine Aussage darüber, welche Speicherdauer rechtlich erforderlich oder zulässig ist.
+
+Implementiere einen Retention Job:
+
+```text
+events older than retention_days
+ -> chunkweise löschen
+```
+
+Nicht personenbezogene, echte Aggregationen dürfen separat behandelt werden.
+
+Retention darf die Datenbank nicht durch einen gigantischen `DELETE` blockieren.
+
+---
+
+# 19. Dashboard-Authentifizierung
+
+Das Dashboard darf niemals öffentlich sein.
+
+Für Version 1 genügt eine robuste Single-User-/Multi-Admin-Authentifizierung.
+
+Anforderungen:
+
+* Passwort-Hashes mit Argon2id
+* Secure Cookie
+* HttpOnly
+* SameSite
+* CSRF-Schutz bei schreibenden Requests
+* Login Rate Limiting
+* keine Tokens im LocalStorage
+* sichere Logout-Funktion
+
+Initialen Admin entweder:
+
+* über CLI
+* Environment Setup
+* einmaligen Setup-Prozess
+
+erzeugen.
+
+Keine Default-Passwörter.
+
+---
+
+# 20. Dashboard
+
+Erstelle ein übersichtliches, schnelles Analytics-Dashboard.
+
+Kein visuell überladenes Enterprise-BI-System.
+
+Startseite:
+
+```text
+Site
+Zeitraum
+Tracking-Modus
+```
+
+KPIs:
+
+```text
+Page Views
+Sessions
+Visitors
+Events
+Engagement
+Consent-Anteil
+```
+
+Dabei:
+
+Sessions und Visitors nur anzeigen, soweit diese Kennzahlen aus den vorhandenen Daten tatsächlich ermittelbar sind.
+
+Für BASIC darf niemals aus IP, User-Agent oder Fingerprints eine künstliche Besucherzahl errechnet werden.
+
+---
+
+# 21. Dashboard-Übersicht
+
+Die Hauptansicht sollte enthalten:
+
+```text
+Page Views im Zeitverlauf
+
+Top Pages
+Entry Pages
+Exit Pages
+
+Referrer
+Campaigns
+
+Devices
+Browsers
+Operating Systems
+
+Countries
+
+Events
+
+Performance
+
+Tracking Mode:
+Basic vs Consented
+```
+
+Zeitraum:
+
+```text
+Heute
+Gestern
+7 Tage
+30 Tage
+Dieser Monat
+Letzter Monat
+benutzerdefiniert
+```
+
+---
+
+# 22. Analyseansichten
+
+Baue das Dashboard modular.
+
+Mindestens folgende Ansichten:
+
+## Overview
+
+Gesamtübersicht.
+
+## Traffic
+
+```text
+Page Views
+Visitors
+Sessions
+Verlauf
+Tageszeit
+Wochentage
+```
+
+## Content
+
+```text
+Top Pages
+Landing Pages
+Exit Pages
+Engagement pro Seite
+Scroll Depth
+```
+
+## Acquisition
+
+```text
+Referrer
+Source
+Medium
+Campaign
+UTM-Auswertung
+```
+
+## Events
+
+```text
+Eventname
+Anzahl
+Entwicklung
+Properties
+```
+
+## Engagement
+
+```text
+Engagement Time
+Scroll Depth
+Outbound Links
+Downloads
+```
+
+## Devices
+
+```text
+Device Classes
+Browser
+OS
+Viewport Buckets
+Languages
+```
+
+## Geography
+
+Nur falls Geo aktiviert:
+
+```text
+Countries
+Regions
+```
+
+## Performance
+
+```text
+LCP
+CLS
+INP
+FCP
+TTFB
+Load Time
+```
+
+## Funnels
+
+Konfigurierbare Ereignisfolgen.
+
+Beispiel:
+
+```text
+/product
+ -> cta_click
+ -> /checkout
+ -> purchase_completed
+```
+
+## Retention
+
+Nur bei CONSENTED-Daten.
+
+## Privacy
+
+Besonders wichtig.
+
+Zeige:
+
+```text
+Basic Page Views
+Consented Page Views
+Consent Rate
+Retention
+Geo aktiviert/deaktiviert
+gespeicherte Datenkategorien
+letzter Retention-Lauf
+```
+
+---
+
+# 23. Erweiterbare Analytics-Architektur
+
+Neue Analysebereiche müssen hinzugefügt werden können, ohne das gesamte Dashboard umzubauen.
+
+Entwickle dafür ein Modulkonzept.
+
+Beispielsweise:
+
+```ts
+interface AnalyticsModule {
+    id: string;
+    title: string;
+    route: string;
+    requiredMode?: "basic" | "consented";
+}
+```
+
+Frontend und Backend sollen logisch getrennte Analytics-Module besitzen.
+
+Eine neue Auswertung soll im Idealfall nur benötigen:
+
+```text
+Backend Query
+Response Type
+Frontend View
+Navigation Registration
+Tests
+```
+
+Keine gigantische zentrale `analytics.ts`.
+
+---
+
+# 24. Filter
+
+Analyseansichten sollen einheitliche Filter unterstützen.
+
+Mindestens:
+
+```text
+Zeitraum
+Site
+Page
+Event
+Referrer
+Campaign
+Device
+Browser
+OS
+Country
+Tracking Mode
+```
+
+Filterzustand möglichst über URL-Parameter abbilden, damit Analyseansichten teilbar/bookmarkbar sind.
+
+---
+
+# 25. Vergleich
+
+Ermögliche optional Vergleiche:
+
+```text
+vorheriger Zeitraum
+Vorwoche
+Vormonat
+```
+
+Kennzahlen mit:
+
+```text
+absolute change
+percentage change
+```
+
+Division durch 0 sauber behandeln.
+
+---
+
+# 26. Export
+
+Biete CSV-Export für Tabellen und Analyseergebnisse.
+
+Keine personenbezogenen Visitor-IDs im normalen Dashboard-Export.
+
+Rohdatenexport muss separat behandelt und klar gekennzeichnet werden.
+
+---
+
+# 27. Bot-Erkennung
+
+Bots und Crawler sollen nach Möglichkeit als solche markiert werden.
+
+Keine riesige externe Bot-Infrastruktur bauen.
+
+V1 kann beispielsweise bekannte User-Agent-Muster erkennen.
+
+Speichere:
+
+```text
+is_bot
+```
+
+Dashboard soll standardmäßig menschlichen Traffic anzeigen und optional Bots einblendbar machen.
+
+Bot-Erkennung darf niemals als hundertprozentig zuverlässig dargestellt werden.
+
+---
+
+# 28. Data Subject Operations
+
+Für pseudonyme CONSENTED-Daten muss eine Löschung technisch möglich sein.
+
+Implementiere serverseitig eine Funktion wie:
+
+```text
+delete all events for visitor_id
+```
+
+und gegebenenfalls:
+
+```text
+export visitor data
+```
+
+Diese administrativen Funktionen müssen geschützt sein.
+
+Das Browser-SDK kann zusätzlich:
+
+```ts
+tracker.forget();
+```
+
+bereitstellen.
+
+Aggregierte, tatsächlich nicht mehr personenbeziehbare Statistik muss nicht durch künstliche Rückrechnung verändert werden.
+
+Dokumentiere dieses Verhalten.
+
+---
+
+# 29. Sicherheit
+
+Behandle sämtliche Trackingdaten als nicht vertrauenswürdigen Input.
+
+Pflicht:
+
+* JSON Schema Validation
+* SQL ausschließlich parametrisiert
+* XSS-Schutz
+* CSP für Dashboard
+* sichere Response Headers
+* CORS-Allowlist
+* Request Limits
+* keine Secrets im Browser
+* keine sensiblen Daten in Logs
+* keine vollständigen Collector Payloads in Production Logs
+* keine IP-Adressen in Applikationslogs, soweit vermeidbar
+* sichere Fehlerausgaben
+* Production Stacktraces nicht an Clients senden
+
+---
+
+# 30. Logs
+
+Strukturiertes Logging.
+
+Beispiel:
+
+```text
+level
+timestamp
+request_id
+component
+message
+```
+
+Nicht loggen:
+
+```text
+IP
+visitor_id
+session_id
+Authorization Header
+Cookies
+komplette Event Payloads
+```
+
+Debugging muss ohne das Kopieren personenbezogener Analyticsdaten in Logs möglich sein.
+
+---
+
+# 31. Konfiguration
+
+`.env.example` mindestens:
+
+```dotenv
+NODE_ENV=production
+PORT=3000
+
+DATABASE_HOST=mariadb
+DATABASE_PORT=3306
+DATABASE_NAME=lumly
+DATABASE_USER=lumly
+DATABASE_PASSWORD=
+
+APP_ORIGIN=https://analytics.example.org
+
+COOKIE_SECRET=
+ADMIN_SETUP_TOKEN=
+
+DEFAULT_RETENTION_DAYS=90
+GEO_ENABLED=false
+```
+
+Keine echten Secrets committen.
+
+---
+
+# 32. Docker
+
+Erstelle ein funktionierendes:
+
+```text
+docker-compose.yml
+```
+
+mit mindestens:
+
+```text
+lumly
+mariadb
+```
+
+MariaDB-Daten in persistentem Volume.
+
+Healthchecks für beide Dienste.
+
+Migrationen beim Deployment kontrolliert ausführen.
+
+Kein automatisches destruktives Schema-Reset.
+
+---
+
+# 33. Integration Guide
+
+Erstelle `docs/integration.md`.
+
+Die Anleitung muss so einfach sein, dass ein Entwickler lumly innerhalb weniger Minuten integrieren kann.
+
+Zeige mindestens:
+
+### Klassische Webseite
+
+```html
+<script ...></script>
+```
+
+### Consent Manager
+
+```js
+tracker.setConsent("granted");
+```
+
+### Custom Events
+
+```js
+tracker.track(...);
+```
+
+### React
+
+Beispiel.
+
+### Next.js
+
+Beispiel.
+
+### SPA
+
+Navigation.
+
+### Opt-out/Widerruf
+
+Beispiel.
+
+### Content Security Policy
+
+Welche Domains für:
+
+```text
+script-src
+connect-src
+```
+
+notwendig sind.
+
+---
+
+# 34. Datenschutzdokumentation
+
+Erstelle `docs/privacy-design.md`.
+
+Dokumentiere nachvollziehbar:
+
+```text
+welche Daten erhoben werden
+wann sie erhoben werden
+warum sie erhoben werden
+welcher Tracking-Modus sie benötigt
+wo sie gespeichert werden
+wie lange sie gespeichert werden
+wann sie gelöscht werden
+```
+
+Erstelle eine Tabelle:
+
+```text
+Feld
+Zweck
+Basic
+Consented
+Retention
+personenbezogen/pseudonym/anonym
+```
+
+Nicht als Rechtsberatung darstellen.
+
+---
+
+# 35. Legal Checklist
+
+Erstelle:
+
+```text
+docs/legal-checklist.md
+```
+
+Darin keine juristischen Garantien.
+
+Stattdessen Checkliste für Betreiber:
+
+```text
+Verarbeitungszweck definiert?
+Rechtsgrundlage geprüft?
+Consent erforderlich?
+Consent Manager angebunden?
+Datenschutzerklärung ergänzt?
+Retention festgelegt?
+Geo-Daten aktiviert?
+Hosting-Standort dokumentiert?
+Auftragsverarbeitung erforderlich?
+Betroffenenrechte organisatorisch geklärt?
+Custom Events auf PII geprüft?
+```
+
+Fordere bei Zweifelsfällen eine Prüfung durch Datenschutzfachleute.
+
+---
+
+# 36. Data Dictionary
+
+Erstelle:
+
+```text
+docs/data-dictionary.md
+```
+
+Für jedes Datenbankfeld:
+
+```text
+Name
+Typ
+Beschreibung
+Quelle
+Basic/Consented
+Beispiel
+Retention
+```
+
+Dies soll zugleich bei Datenschutzprüfung und Entwicklung helfen.
+
+---
+
+# 37. Tests
+
+Schreibe automatisierte Tests.
+
+Besonders wichtig sind Privacy-Tests.
+
+Mindestens testen:
+
+```text
+BASIC erzeugt keine Visitor-ID
+BASIC erzeugt keine Session-ID
+BASIC schreibt keinen LocalStorage
+BASIC schreibt keinen SessionStorage
+BASIC setzt keinen Cookie
+BASIC speichert keine IP
+BASIC speichert keinen vollständigen User-Agent
+Consent-Wechsel aktiviert erweiterte Daten
+Consent-Widerruf löscht lokale IDs
+Querystrings werden sanitisiert
+JWTs werden entfernt
+E-Mail-Adressen werden erkannt
+Formularwerte werden niemals automatisch übertragen
+Origins werden geprüft
+ungültige Events werden abgelehnt
+Retention löscht alte Daten
+Visitor-Löschung funktioniert
+Rollups enthalten keine Visitor-ID
+```
+
+Privacy-Tests sind Blocker.
+
+Ein Build darf bei fehlgeschlagenen Privacy-Tests nicht als erfolgreich gelten.
+
+---
+
+# 38. Performance Tests
+
+Prüfe insbesondere Collector und Tracker.
+
+Ziele:
+
+```text
+Tracker <= 8 kB gzip bevorzugt
+Collector ohne unnötige DB-Roundtrips
+Batch Inserts
+geeignete Indizes
+Dashboard-Abfragen mit Zeitbereich
+keine SELECT * auf großen Eventtabellen
+```
+
+Füge reproduzierbare Beispieldaten hinzu.
+
+---
+
+# 39. Demo-Daten
+
+Erstelle einen Seed-Modus.
+
+Er soll realistische Analytics erzeugen:
+
+```text
+mehrere Tage
+verschiedene Seiten
+Referrer
+Kampagnen
+Browser
+Devices
+Events
+Basic und Consented
+Performance Metrics
+```
+
+Keine echten personenbezogenen Daten.
+
+Damit muss das Dashboard nach dem ersten Start sinnvoll aussehen.
+
+---
+
+# 40. UI
+
+Das Dashboard soll funktional und hochwertig aussehen, aber keine Design-Spielerei sein.
+
+Richtung:
+
+```text
+ruhig
+klar
+editorial
+datenorientiert
+viel Weißraum
+sehr gute Typografie
+```
+
+Keine:
+
+```text
+Glassmorphism
+Neon-SaaS-Optik
+übermäßigen Schatten
+riesigen Gradient-Flächen
+unnötigen Animationen
+```
+
+Desktop zuerst sinnvoll nutzbar, aber vollständig responsive.
+
+Tabellen müssen auch mit großen Datenmengen funktionieren.
+
+---
+
+# 41. Charts
+
+Vermeide eine riesige Visualisierungsbibliothek, wenn einfache SVG-/Canvas-Darstellung genügt.
+
+Benötigt werden unter anderem:
+
+```text
+Line Chart
+Bar Chart
+Stacked Bar
+kleine Sparklines
+```
+
+Pie Charts nur einsetzen, wenn sie tatsächlich sinnvoll sind.
+
+Alle Diagramme müssen:
+
+* Achsen verständlich beschriften
+* Tooltips besitzen
+* leere Zustände behandeln
+* responsive sein
+* nicht nur über Farbe verständlich sein
+
+---
+
+# 42. Accessibility
+
+Dashboard mindestens mit:
+
+* semantischem HTML
+* Tastaturbedienbarkeit
+* sichtbaren Focus States
+* Labels
+* ARIA nur dort, wo nötig
+* ausreichenden Kontrasten
+* verständlichen Fehlermeldungen
+
+bauen.
+
+---
+
+# 43. API-Trennung
+
+Trenne öffentliches Tracking von administrativer Analytics-API.
+
+Beispiel:
+
+```text
+/api/v1/collect
+
+/api/v1/auth/*
+/api/v1/sites/*
+/api/v1/analytics/*
+/api/v1/funnels/*
+/api/v1/privacy/*
+```
+
+Collector benötigt keine Dashboard-Session.
+
+Alle administrativen Endpunkte benötigen Authentifizierung.
+
+---
+
+# 44. Kein versteckter Datenabfluss
+
+Die Standardinstallation darf keine Tracking- oder Nutzungsdaten an den Hersteller von lumly senden.
+
+Kein:
+
+```text
+Telemetry
+Crash Reporting
+Google Fonts
+Google Analytics
+CDN Tracking
+externe Map API
+```
+
+ohne ausdrückliche Aktivierung.
+
+Core-Funktionalität muss vollständig selbst gehostet funktionieren.
+
+---
+
+# 45. Entwicklungsprinzipien
+
+Prioritäten in dieser Reihenfolge:
+
+```text
+1. Datenschutz-Invarianten
+2. Datenkorrektheit
+3. Sicherheit
+4. Einfachheit
+5. Performance
+6. Erweiterbarkeit
+7. UI-Komfort
+```
+
+Keine Funktion darf Privacy-Invarianten verletzen, nur um eine interessantere Kennzahl zu erzeugen.
+
+Insbesondere:
+
+**Wenn eine Kennzahl ohne persistente Nutzererkennung nicht berechenbar ist, zeige sie im BASIC-Modus nicht an.**
+
+Keine heimliche Näherung über:
+
+```text
+IP
+User Agent
+Fingerprint
+Zeitfenster
+```
+
+---
+
+# 46. Entwicklungsablauf
+
+Implementiere das Projekt iterativ.
+
+Reihenfolge:
+
+```text
+1. Repository und Tooling
+2. MariaDB Schema + Migrationen
+3. Collector
+4. Sanitizer
+5. BASIC Tracker
+6. Privacy Tests
+7. Consent State Machine
+8. CONSENTED Tracker
+9. Aggregationen
+10. Analytics API
+11. Dashboard
+12. Analyse-Module
+13. Funnels
+14. Privacy Administration
+15. Integration Guide
+16. Docker Setup
+17. End-to-End Tests
+18. Optimierung des Tracker Bundles
+```
+
+Nach jedem wesentlichen Schritt muss die Anwendung weiterhin startbar sein.
+
+---
+
+# 47. Definition of Done
+
+Das Projekt gilt erst als fertig, wenn:
+
+* `docker compose up` eine verwendbare Installation startet
+* Migrationen funktionieren
+* ein Admin angelegt werden kann
+* eine Site angelegt werden kann
+* ein Integrationssnippet angezeigt wird
+* das Snippet Events sendet
+* BASIC keinerlei persistente Besucherkennung erzeugt
+* CONSENTED erst nach Einwilligung aktiviert wird
+* Widerruf funktioniert
+* Daten in MariaDB gespeichert werden
+* das Dashboard echte DB-Daten verwendet
+* Zeitraumfilter funktionieren
+* Overview funktioniert
+* Traffic funktioniert
+* Content funktioniert
+* Acquisition funktioniert
+* Events funktioniert
+* Devices funktioniert
+* Performance funktioniert
+* Funnels funktionieren
+* Privacy-Ansicht funktioniert
+* Retention funktioniert
+* Custom Events funktionieren
+* CSV Export funktioniert
+* Dokumentation vorhanden ist
+* Privacy-Tests bestehen
+* normale Unit-/Integrationstests bestehen
+* TypeScript ohne Fehler baut
+* Production Build funktioniert
+
+---
+
+# 48. Vorgehen bei Unsicherheit
+
+Treffe vernünftige technische Entscheidungen selbst.
+
+Frage nicht bei jeder Kleinigkeit nach.
+
+Wenn zwei Lösungen möglich sind:
+
+1. bevorzuge die einfachere
+2. bevorzuge weniger Dependencies
+3. bevorzuge weniger gespeicherte personenbezogene Daten
+4. bevorzuge explizites Verhalten gegenüber Magie
+5. dokumentiere relevante Trade-offs
+
+Wenn eine gewünschte Analytics-Funktion nur durch Fingerprinting oder andere problematische Wiedererkennung möglich wäre:
+
+**implementiere sie nicht auf diese Weise.**
+
+Dokumentiere stattdessen die technische Einschränkung.
+
+---
+
+# 49. Erwartete Ausgabe und Arbeitsweise
+
+Erstelle nicht nur ein Konzept oder Mockup.
+
+Implementiere die Anwendung vollständig.
+
+Keine Platzhalter wie:
+
+```text
+TODO implement later
+mock analytics response
+fake chart data
+temporary hardcoded user
+```
+
+für Funktionen, die zum definierten Funktionsumfang gehören.
+
+Nutze Mock-/Seed-Daten ausschließlich als expliziten Demo-Modus.
+
+Das normale Dashboard muss seine Daten aus MariaDB beziehen.
+
+Halte `README.md`, `AGENTS.md`, Migrationen und Dokumentation während der Entwicklung aktuell.
+
+Wenn du bestehende Dateien veränderst:
+
+* analysiere zuerst die vorhandene Struktur
+* erhalte bestehende funktionierende Teile
+* ändere nur, was für die Aufgabe erforderlich ist
+* vermeide unnötige Refactorings
+* lasse keine halb migrierten Zwischenzustände zurück
+
+Am Ende liefere:
+
+```text
+vollständige Anwendung
+vollständige Datenbankmigrationen
+Docker-Konfiguration
+Tracker SDK
+Dashboard
+Dokumentation
+Tests
+Seed-Daten
+Integrationsbeispiele
+```
+
+Das Ergebnis soll kein Proof of Concept sein, sondern eine solide Version 1, auf der weiterentwickelt werden kann.

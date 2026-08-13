@@ -1,0 +1,12 @@
+.git
+node_modules
+**/node_modules
+apps/dashboard/dist
+packages/tracker/dist
+apps/server/dist
+packages/shared/dist
+.env
+*.log
+prompt.txt
+docs
+tests

@@ -1,0 +1,21 @@
+{
+  "name": "lumly",
+  "version": "1.0.0",
+  "private": true,
+  "description": "lumly - privacy-first, self-hosted web analytics",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "test:privacy": "pnpm --filter @lumly/shared --filter @lumly/browser test",
+    "typecheck": "pnpm -r typecheck",
+    "migrate": "pnpm --filter @lumly/server migrate",
+    "seed": "pnpm --filter @lumly/server seed",
+    "create-admin": "pnpm --filter @lumly/server create-admin"
+  }
+}

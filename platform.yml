@@ -1,0 +1,18 @@
+manifestVersion: "1"
+
+app:
+  name: lumly
+  displayName: Lumly
+  version: "1.0.0"
+
+docker:
+  dockerfile: Dockerfile
+  context: .
+
+runtime:
+  port: 3000
+  healthcheck: /health
+
+database:
+  type: mariadb
+  database: lumly
