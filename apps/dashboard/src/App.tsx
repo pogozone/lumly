@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
+import { APP_BASENAME } from "./runtime";
 import { FiltersProvider } from "./filters";
 import { AcquisitionPage } from "./pages/Acquisition";
 import { ContentPage } from "./pages/Content";
@@ -44,7 +45,7 @@ function Shell() {
 
 export function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={APP_BASENAME}>
       <AuthProvider>
         <Shell />
       </AuthProvider>

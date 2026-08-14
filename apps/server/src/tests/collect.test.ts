@@ -113,7 +113,7 @@ describe("OPTIONS /api/v1/collect", () => {
     expect(String(res.headers.vary ?? "").toLowerCase()).toContain("origin");
   });
 
-  it("rejects the CORS preflight for an unknown origin", async () => {
+  it("allows preflight transport for an unknown origin and leaves authorization to POST", async () => {
     const res = await app.inject({
       method: "OPTIONS",
       url: "/api/v1/collect",
@@ -123,8 +123,8 @@ describe("OPTIONS /api/v1/collect", () => {
       }
     });
 
-    expect(res.statusCode).toBe(403);
-    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://evil.example.com");
   });
 });
 

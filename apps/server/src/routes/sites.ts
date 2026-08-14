@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { randomId } from "@lumly/shared";
 import type { AppContext } from "../context.js";
 import { execute } from "../db.js";
@@ -45,39 +45,11 @@ function normalizeOrigin(value: unknown): string | null {
   }
 }
 
-/**
- * Return the public origin through which the dashboard request reached Lumly.
- *
- * This matters behind `platform`/Apache: the Node process listens on an
- * internal address such as http://127.0.0.1:3000 while the browser uses
- * http://lumly.emaz.local. Fastify runs with trustProxy=true, so `protocol`
- * honours the proxy headers and ProxyPreserveHost keeps the public Host.
- */
-function publicRequestOrigin(request: FastifyRequest, fallback: string): string {
-  const host = request.headers.host;
-
-  if (host) {
-    try {
-      const origin = new URL(`${request.protocol}://${host}`).origin;
-      if (origin !== "null") return origin;
-    } catch {
-      // Fall through to the configured origin.
-    }
-  }
-
-  try {
-    return new URL(fallback).origin;
-  } catch {
-    return fallback;
-  }
-}
-
 export function registerSiteRoutes(app: FastifyInstance, ctx: AppContext): void {
   const auth = requireAuth(ctx);
 
-  app.get("/api/v1/sites", { preHandler: auth }, async (request) => ({
-    sites: await ctx.sites.list(),
-    appOrigin: publicRequestOrigin(request, ctx.config.appOrigin)
+  app.get("/api/v1/sites", { preHandler: auth }, async () => ({
+    sites: await ctx.sites.list()
   }));
 
   app.post("/api/v1/sites", { preHandler: auth }, async (request, reply) => {
@@ -161,10 +133,10 @@ export function registerSiteRoutes(app: FastifyInstance, ctx: AppContext): void 
     const site = await ctx.sites.get(id);
     if (!site) return reply.code(404).send({ error: "unknown_site" });
 
-    const origin = publicRequestOrigin(request, ctx.config.appOrigin);
     return {
       siteId: site.id,
-      html: `<script defer src="${origin}/tracker.js" data-site="${site.id}" data-endpoint="${origin}/api/v1/collect"></script>`
+      trackerPath: "tracker.js",
+      collectorPath: "api/v1/collect"
     };
   });
 }

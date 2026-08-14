@@ -4,6 +4,7 @@ import { DataTable } from "../components/DataTable";
 import { Layout } from "../components/Layout";
 import { Kpi, useModule } from "../components/useModule";
 import { useFilters } from "../filters";
+import { appUrl } from "../runtime";
 
 export function PrivacyPage() {
   const { data, error } = useModule("privacy");
@@ -85,7 +86,10 @@ export function PrivacyPage() {
                 />
                 <button className="danger" onClick={() => void deleteVisitor()}>Löschen</button>
                 {visitorId.trim() && filters.site && (
-                  <a className="button" href={`/api/v1/privacy/visitors/${filters.site}/${encodeURIComponent(visitorId.trim())}/export`}>
+                  <a
+                    className="button"
+                    href={appUrl(`api/v1/privacy/visitors/${filters.site}/${encodeURIComponent(visitorId.trim())}/export`).toString()}
+                  >
                     Export
                   </a>
                 )}

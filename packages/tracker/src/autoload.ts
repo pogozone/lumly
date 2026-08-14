@@ -17,9 +17,10 @@ import type { ConsentState, Tracker } from "./types.js";
 
     const siteId = script.getAttribute("data-site");
     if (!siteId) return;
+    const scriptUrl = new URL(script.getAttribute("src") ?? "./tracker.js", location.href);
     const endpoint =
       script.getAttribute("data-endpoint") ??
-      `${new URL(script.getAttribute("src") ?? location.origin, location.href).origin}/api/v1/collect`;
+      new URL("api/v1/collect", new URL("./", scriptUrl)).toString();
     const autoTrack = script.getAttribute("data-auto-track") !== "false";
     const consent = (script.getAttribute("data-consent") ?? "unknown") as ConsentState;
 

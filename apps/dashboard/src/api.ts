@@ -1,5 +1,7 @@
 /** API client. Session cookie is HttpOnly; CSRF token is kept in memory only. */
 
+import { appUrl } from "./runtime";
+
 let csrfToken: string | null = null;
 
 export function setCsrfToken(token: string | null): void {
@@ -22,7 +24,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (options.method && options.method !== "GET" && csrfToken) {
     headers["X-CSRF-Token"] = csrfToken;
   }
-  const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
+
+  const res = await fetch(appUrl(path), {
+    ...options,
+    headers,
+    credentials: "same-origin"
+  });
+
   if (res.status === 204) return undefined as T;
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
@@ -72,5 +80,8 @@ export function moduleQuery(params: Record<string, string | undefined>): string 
 }
 
 export function exportUrl(moduleId: string, table: string, params: Record<string, string | undefined>): string {
-  return `/api/v1/analytics/${moduleId}/export?table=${encodeURIComponent(table)}&${moduleQuery(params)}`;
+  const query = moduleQuery(params);
+  return appUrl(
+    `api/v1/analytics/${encodeURIComponent(moduleId)}/export?table=${encodeURIComponent(table)}${query ? `&${query}` : ""}`
+  ).toString();
 }

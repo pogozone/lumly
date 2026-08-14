@@ -40,30 +40,14 @@ function setCollectorCorsHeaders(reply: FastifyReply, origin: string): void {
   addVaryOrigin(reply);
 }
 
-async function originExistsInAnySite(ctx: AppContext, origin: string): Promise<boolean> {
-  const sites = await ctx.sites.list();
-  return sites.some((site) => originAllowed(site, origin));
-}
-
 export function registerCollectRoute(app: FastifyInstance, ctx: AppContext): void {
   /**
-   * Browser CORS preflight. OPTIONS cannot contain the later POST body and
-   * therefore cannot tell us the site ID yet. We allow the preflight only when
-   * the requesting origin occurs in at least one configured site. The actual
-   * POST then performs the stricter site + origin check again.
+   * Browser CORS preflight. OPTIONS has no collector body and therefore no
+   * site ID. Authorize the site + origin on the actual POST, not here.
    */
   app.options("/api/v1/collect", async (request, reply) => {
     const origin = request.headers.origin;
-
-    if (!origin) {
-      return reply.code(204).send();
-    }
-
-    if (!(await originExistsInAnySite(ctx, origin))) {
-      return reply.code(403).send({ error: "origin_not_allowed" });
-    }
-
-    setCollectorCorsHeaders(reply, origin);
+    if (origin) setCollectorCorsHeaders(reply, origin);
     return reply.code(204).send();
   });
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type SiteDto } from "../api";
 import { Layout } from "../components/Layout";
+import { APP_BASE_URL, appUrl } from "../runtime";
 
 function normalizeOriginInput(value: string): string | null {
   const raw = value.trim();
@@ -39,7 +40,6 @@ function siteErrorMessage(error: unknown): string {
 
 export function SitesPage() {
   const [sites, setSites] = useState<SiteDto[]>([]);
-  const [appOrigin, setAppOrigin] = useState("");
   const [snippets, setSnippets] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -49,9 +49,8 @@ export function SitesPage() {
   const [retentionDays, setRetentionDays] = useState("90");
 
   async function load() {
-    const res = await api.get<{ sites: SiteDto[]; appOrigin: string }>("/api/v1/sites");
+    const res = await api.get<{ sites: SiteDto[] }>("/api/v1/sites");
     setSites(res.sites);
-    setAppOrigin(res.appOrigin);
   }
 
   useEffect(() => {
@@ -59,8 +58,13 @@ export function SitesPage() {
   }, []);
 
   async function showSnippet(id: string) {
-    const res = await api.get<{ html: string }>(`/api/v1/sites/${id}/snippet`);
-    setSnippets((current) => ({ ...current, [id]: res.html }));
+    const res = await api.get<{ siteId: string; trackerPath: string; collectorPath: string }>(
+      `/api/v1/sites/${id}/snippet`
+    );
+    const trackerUrl = appUrl(res.trackerPath).toString();
+    const collectorUrl = appUrl(res.collectorPath).toString();
+    const html = `<script defer src="${trackerUrl}" data-site="${res.siteId}" data-endpoint="${collectorUrl}"></script>`;
+    setSnippets((current) => ({ ...current, [id]: html }));
   }
 
   async function create(e: React.FormEvent) {
@@ -158,7 +162,7 @@ export function SitesPage() {
                 <div className="code-box" style={{ marginTop: "0.7rem" }}>{snippets[site.id]}</div>
                 <p style={{ fontSize: "0.8rem", color: "var(--ink-3)" }}>
                   Die Site-ID ist öffentlich und kein Geheimnis. Missbrauchsschutz erfolgt über die Origin-Allowlist.
-                  App-Origin: {appOrigin}
+                  Lumly-Basis: {APP_BASE_URL.toString()}
                 </p>
               </>
             )}
