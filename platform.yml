@@ -16,3 +16,11 @@ runtime:
 database:
   type: mariadb
   database: lumly
+
+  urlEnvironmentVariable: DATABASE_URL
+  nameEnvironmentVariable: DATABASE_NAME
+  environmentPrefix: DATABASE_
+
+environment:
+  COOKIE_SECRET: ${LUMLY_COOKIE_SECRET}
+  ADMIN_SETUP_TOKEN: ${LUMLY_ADMIN_SETUP_TOKEN}

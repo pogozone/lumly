@@ -356,13 +356,26 @@ export function createTracker(config: TrackerConfig): Tracker {
           /* ignore */
         }
       });
-      po.observe({ type: "largest-contentful-paint", buffered: true });
-      po.observe({ type: "paint", buffered: true });
-      po.observe({ type: "layout-shift", buffered: true });
-      try {
-        po.observe({ type: "event", buffered: true, durationThreshold: 16 } as PerformanceObserverInit);
-      } catch {
-        /* event timing unsupported */
+      const supported = Array.isArray(PerformanceObserver.supportedEntryTypes)
+        ? new Set(PerformanceObserver.supportedEntryTypes)
+        : null;
+      const canObserve = (type: string) => supported === null || supported.has(type);
+
+      if (canObserve("largest-contentful-paint")) {
+        po.observe({ type: "largest-contentful-paint", buffered: true });
+      }
+      if (canObserve("paint")) {
+        po.observe({ type: "paint", buffered: true });
+      }
+      if (canObserve("layout-shift")) {
+        po.observe({ type: "layout-shift", buffered: true });
+      }
+      if (canObserve("event")) {
+        try {
+          po.observe({ type: "event", buffered: true, durationThreshold: 16 } as PerformanceObserverInit);
+        } catch {
+          /* event timing unsupported */
+        }
       }
     } catch {
       /* performance APIs unavailable: never an error */

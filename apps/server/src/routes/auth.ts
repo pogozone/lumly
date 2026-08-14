@@ -13,12 +13,15 @@ declare module "fastify" {
   }
 }
 
-function sessionCookie(ctx: AppContext) {
+function sessionCookie(request: FastifyRequest) {
   return {
     path: "/",
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: ctx.config.env === "production"
+    // Local deployments served over plain HTTP must not receive a Secure
+    // cookie. Behind an HTTPS reverse proxy Fastify resolves request.protocol
+    // from X-Forwarded-Proto because the app runs with trustProxy enabled.
+    secure: request.protocol === "https"
   };
 }
 
@@ -56,7 +59,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       return reply.code(401).send({ error: "invalid_credentials" });
     }
     reply.setCookie(COOKIE_NAME, session.sessionId, {
-      ...sessionCookie(ctx),
+      ...sessionCookie(request),
       expires: session.expiresAt
     });
     return { email: session.email, csrfToken: session.csrfToken };
@@ -65,7 +68,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.post("/api/v1/auth/logout", async (request, reply) => {
     const sessionId = request.cookies[COOKIE_NAME];
     if (sessionId) await logout(ctx.pool, sessionId);
-    reply.clearCookie(COOKIE_NAME, sessionCookie(ctx));
+    reply.clearCookie(COOKIE_NAME, sessionCookie(request));
     return reply.code(204).send();
   });
 

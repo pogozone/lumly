@@ -15,22 +15,27 @@ import type { ServerConfig } from "../config.js";
 const insertedRows: unknown[][] = [];
 
 function stubPool(): Pool {
+  const siteRow = {
+    id: "site-1",
+    name: "Test",
+    domain: "shop.example.org",
+    allowed_origins: JSON.stringify(["https://shop.example.org"]),
+    timezone: "UTC",
+    retention_days: 90,
+    geo_enabled: 0,
+    default_tracking_mode: "basic",
+    query_allowlist: "[]",
+    created_at: new Date()
+  };
+
   const stub = {
     async query(sql: string, params?: unknown) {
       if (sql.includes("FROM sites WHERE id")) {
         if ((params as { id?: string })?.id !== "site-1") return [[], []];
-        return [[{
-          id: "site-1",
-          name: "Test",
-          domain: "shop.example.org",
-          allowed_origins: JSON.stringify(["https://shop.example.org"]),
-          timezone: "UTC",
-          retention_days: 90,
-          geo_enabled: 0,
-          default_tracking_mode: "basic",
-          query_allowlist: "[]",
-          created_at: new Date()
-        }], []];
+        return [[siteRow], []];
+      }
+      if (sql.includes("FROM sites ORDER BY")) {
+        return [[siteRow], []];
       }
       if (sql.startsWith("INSERT IGNORE INTO events")) {
         const values = (params as unknown[][][])[0]!;
@@ -89,6 +94,40 @@ const validEvent = {
   path: "/produkte"
 };
 
+describe("OPTIONS /api/v1/collect", () => {
+  it("answers the CORS preflight for a configured origin", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/api/v1/collect",
+      headers: {
+        origin: "https://shop.example.org",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type"
+      }
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://shop.example.org");
+    expect(res.headers["access-control-allow-methods"]).toContain("POST");
+    expect(String(res.headers["access-control-allow-headers"] ?? "").toLowerCase()).toContain("content-type");
+    expect(String(res.headers.vary ?? "").toLowerCase()).toContain("origin");
+  });
+
+  it("rejects the CORS preflight for an unknown origin", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/api/v1/collect",
+      headers: {
+        origin: "https://evil.example.com",
+        "access-control-request-method": "POST"
+      }
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
 describe("POST /api/v1/collect", () => {
   it("accepts a valid basic event from an allowed origin", async () => {
     insertedRows.length = 0;
@@ -99,6 +138,7 @@ describe("POST /api/v1/collect", () => {
       payload: envelope([validEvent])
     });
     expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://shop.example.org");
     expect(insertedRows).toHaveLength(1);
     // columns 6/7 are visitor_id / session_id — must be NULL in basic
     expect(insertedRows[0]![6]).toBeNull();

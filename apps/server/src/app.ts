@@ -1,6 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
-import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -31,10 +30,10 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   });
 
   await app.register(cookie);
-  await app.register(cors, {
-    origin: false, // collector does origin checks itself; admin API is same-origin
-    credentials: false
-  });
+
+  // CORS is intentionally not enabled globally. The admin API is same-origin,
+  // while the public collector implements a narrow, site-aware CORS policy in
+  // routes/collect.ts.
 
   // Security headers for everything; strict CSP for the dashboard.
   app.addHook("onSend", async (request, reply) => {
@@ -45,7 +44,7 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
     if (!request.url.startsWith("/api/v1/collect")) {
       reply.header(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
       );
     }
   });
